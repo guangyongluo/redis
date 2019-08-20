@@ -17,14 +17,15 @@ public class Chapter02 {
         Jedis conn = new Jedis("192.168.193.128");
         conn.select(15);
 
-        testLoginCookies(conn);
+//        testLoginCookies(conn);
 //        testShopppingCartCookies(conn);
-//        testCacheRows(conn);
+        testCacheRows(conn);
 //        testCacheRequest(conn);
     }
 
     public void testLoginCookies(Jedis conn) throws InterruptedException {
         System.out.println("\n----- testLoginCookies -----");
+        //具有唯一性的用户标识 UUID
         String token = UUID.randomUUID().toString();
 
         updateToken(conn, token, "username", "itemX");
@@ -41,7 +42,7 @@ public class Chapter02 {
         System.out.println("Let's drop the maximum number of cookies to 0 to clean them out");
         System.out.println("We will start a thread to do the cleaning, while we stop it later");
 
-        CleanSessionsThread thread = new CleanSessionsThread(0);
+        CleanSessionsThread thread = new CleanSessionsThread(10);
         thread.start();
         Thread.sleep(1000);
         thread.quit();
@@ -55,14 +56,15 @@ public class Chapter02 {
         assert s == 0;
     }
 
-    public void testShopppingCartCookies(Jedis conn)
-            throws InterruptedException {
+    public void testShopppingCartCookies(Jedis conn) throws InterruptedException {
         System.out.println("\n----- testShopppingCartCookies -----");
         String token = UUID.randomUUID().toString();
 
         System.out.println("We'll refresh our session...");
+        //添加用户的cookie
         updateToken(conn, token, "username", "itemX");
         System.out.println("And add an item to the shopping cart");
+        //添加购物车
         addToCart(conn, token, "itemY", 3);
         Map<String, String> r = conn.hgetAll("cart:" + token);
         System.out.println("Our shopping cart currently has:");
@@ -91,8 +93,7 @@ public class Chapter02 {
         assert r.size() == 0;
     }
 
-    public void testCacheRows(Jedis conn)
-            throws InterruptedException {
+    public void testCacheRows(Jedis conn) throws InterruptedException {
         System.out.println("\n----- testCacheRows -----");
         System.out.println("First, let's schedule caching of itemX every 5 seconds");
         scheduleRowCache(conn, "itemX", 5);
@@ -171,27 +172,52 @@ public class Chapter02 {
         return conn.hget("login:", token);
     }
 
+    /**
+     *
+     * @param conn redis连接
+     * @param token 用户的标识UUID
+     * @param user 用户名
+     * @param item 浏览的商品
+     */
     public void updateToken(Jedis conn, String token, String user, String item) {
+        //获得当前系统时间
         long timestamp = System.currentTimeMillis() / 1000;
+        //添加键为'login:'散列存储用户UUID和用户名键值对
         conn.hset("login:", token, user);
+        //添加键为'recent:'有序表存储用户UUID和登入时间(系统当前时间)同时也是有序表的score
         conn.zadd("recent:", timestamp, token);
         if (item != null) {
+            //添加键为'viewed:用户UUID'的有序表存储商品和浏览时间(系统当前时间)同时也是有序表的score
             conn.zadd("viewed:" + token, timestamp, item);
+            //删除分值最高的到分值倒数第26的浏览商品表，即保留前25条最后浏览商品记录
             conn.zremrangeByRank("viewed:" + token, 0, -26);
+
             conn.zincrby("viewed:", -1, item);
         }
     }
 
+    /**
+     *
+     * @param conn Redis连接
+     * @param session 用户的UUID
+     * @param item 浏览的商品
+     * @param count 商品的数量
+     *              添加键值为'cart:用户UUID'的散列表存储购物车中的商品
+     */
     public void addToCart(Jedis conn, String session, String item, int count) {
         if (count <= 0) {
+            //从购物车里删除数量少于0的商品
             conn.hdel("cart:" + session, item);
         } else {
+            //在购物车里添加商品
             conn.hset("cart:" + session, item, String.valueOf(count));
         }
     }
 
     public void scheduleRowCache(Jedis conn, String rowId, int delay) {
+        //添加键为'delay:'的有序表记录商品和延迟的大小，以延迟大小为分数
         conn.zadd("delay:", delay, rowId);
+        //添加键为'delay:'的有序表记录商品和当前系统时间，以当前系统时间为分数
         conn.zadd("schedule:", System.currentTimeMillis() / 1000, rowId);
     }
 
@@ -308,14 +334,13 @@ public class Chapter02 {
         }
     }
 
-    public class CleanFullSessionsThread
-            extends Thread {
+    public class CleanFullSessionsThread extends Thread {
         private Jedis conn;
         private int limit;
         private boolean quit;
 
         public CleanFullSessionsThread(int limit) {
-            this.conn = new Jedis("localhost");
+            this.conn = new Jedis("192.168.193.128");
             this.conn.select(15);
             this.limit = limit;
         }
@@ -353,13 +378,12 @@ public class Chapter02 {
         }
     }
 
-    public class CacheRowsThread
-            extends Thread {
+    public class CacheRowsThread extends Thread {
         private Jedis conn;
         private boolean quit;
 
         public CacheRowsThread() {
-            this.conn = new Jedis("localhost");
+            this.conn = new Jedis("192.168.193.128");
             this.conn.select(15);
         }
 
